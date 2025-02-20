@@ -35,26 +35,44 @@ jobs:
           echo "Pushing Docker image to Amazon ECR..."
           docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
 
-      - name: Deploy Lambda Function
+      - name: Deploy Lambda Function with Retries
         env:
           FUNCTION_NAME: inspect_point_ai_dataintegration
           IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_NAME }}:${{ github.sha }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
           AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
         run: |
+          set -e
           echo "Retrieving AWS Account ID..."
           ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
           echo "AWS Account ID: $ACCOUNT_ID"
 
+          function retry {
+            local retries=5
+            local delay=5
+            local attempt=1
+            while [ $attempt -le $retries ]; do
+              if "$@"; then
+                return 0
+              fi
+              echo "Attempt $attempt failed. Retrying in $delay seconds..."
+              sleep $delay
+              attempt=$(( attempt + 1 ))
+              delay=$(( delay * 2 ))
+            done
+            echo "Command failed after $retries attempts."
+            return 1
+          }
+
           echo "Checking if Lambda function exists..."
           if aws lambda get-function --function-name $FUNCTION_NAME; then
             echo "Function exists. Updating..."
-            aws lambda update-function-code \
+            retry aws lambda update-function-code \
               --function-name $FUNCTION_NAME \
               --image-uri $IMAGE_URI
           else
             echo "Function does not exist. Creating..."
-            aws lambda create-function \
+            retry aws lambda create-function \
               --function-name $FUNCTION_NAME \
               --role $AWS_ROLE_ARN \
               --package-type Image \
@@ -64,16 +82,35 @@ jobs:
               --region $AWS_REGION
           fi
 
-      - name: Add S3 Trigger
+      - name: Add S3 Trigger with Retries
         env:
           FUNCTION_NAME: inspect_point_ai_dataintegration
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
           S3_EVENT_SUFFIX: .pdf
           AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
-          echo "Granting S3 permission to invoke the Lambda function..."
+          set -e
           ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
-          aws lambda add-permission \
+
+          function retry {
+            local retries=5
+            local delay=5
+            local attempt=1
+            while [ $attempt -le $retries ]; do
+              if "$@"; then
+                return 0
+              fi
+              echo "Attempt $attempt failed. Retrying in $delay seconds..."
+              sleep $delay
+              attempt=$(( attempt + 1 ))
+              delay=$(( delay * 2 ))
+            done
+            echo "Command failed after $retries attempts."
+            return 1
+          }
+
+          echo "Granting S3 permission to invoke the Lambda function..."
+          retry aws lambda add-permission \
             --function-name $FUNCTION_NAME \
             --statement-id s3-trigger \
             --action lambda:InvokeFunction \
@@ -82,7 +119,7 @@ jobs:
             --source-account $ACCOUNT_ID || echo "Permission already exists."
 
           echo "Adding S3 trigger for bucket: $S3_BUCKET_NAME and suffix: $S3_EVENT_SUFFIX..."
-          aws s3api put-bucket-notification-configuration \
+          retry aws s3api put-bucket-notification-configuration \
             --bucket $S3_BUCKET_NAME \
             --notification-configuration '{
               "LambdaFunctionConfigurations": [
@@ -100,4 +137,4 @@ jobs:
               ]
             }'
 
-          echo "S3 trigger added and implemented successfully."
+          echo "S3 trigger added successfully."
