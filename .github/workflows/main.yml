@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - main
+
 jobs:
   docker_cicd:
     runs-on: ubuntu-latest
@@ -65,7 +66,7 @@ jobs:
           }
 
           echo "Checking if Lambda function exists..."
-          if aws lambda get-function --function-name $FUNCTION_NAME; then
+          if aws lambda get-function --function-name $FUNCTION_NAME > /dev/null 2>&1; then
             echo "Function exists. Updating..."
             retry aws lambda update-function-code \
               --function-name $FUNCTION_NAME \
@@ -82,7 +83,7 @@ jobs:
               --region $AWS_REGION
           fi
 
-      - name: Add S3 Trigger with Retries
+      - name: Add S3 Trigger with Safe Check
         env:
           FUNCTION_NAME: inspect_point_ai_dataintegration
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
@@ -110,31 +111,37 @@ jobs:
           }
 
           echo "Granting S3 permission to invoke the Lambda function..."
-          retry aws lambda add-permission \
+          aws lambda add-permission \
             --function-name $FUNCTION_NAME \
             --statement-id s3-trigger \
             --action lambda:InvokeFunction \
             --principal s3.amazonaws.com \
             --source-arn arn:aws:s3:::$S3_BUCKET_NAME \
-            --source-account $ACCOUNT_ID || echo "Permission already exists."
+            --source-account $ACCOUNT_ID > /dev/null 2>&1 || echo "Permission already exists."
 
-          echo "Adding S3 trigger for bucket: $S3_BUCKET_NAME and suffix: $S3_EVENT_SUFFIX..."
-          retry aws s3api put-bucket-notification-configuration \
-            --bucket $S3_BUCKET_NAME \
-            --notification-configuration '{
-              "LambdaFunctionConfigurations": [
-                {
-                  "LambdaFunctionArn": "arn:aws:lambda:'"$AWS_REGION"':'"$ACCOUNT_ID"':function:'"$FUNCTION_NAME"'",
-                  "Events": ["s3:ObjectCreated:Put"],
-                  "Filter": {
-                    "Key": {
-                      "FilterRules": [
-                        {"Name": "suffix", "Value": ".pdf"}
-                      ]
+          echo "Checking existing S3 trigger configuration..."
+          EXISTING_CONFIG=$(aws s3api get-bucket-notification-configuration --bucket $S3_BUCKET_NAME)
+          if echo "$EXISTING_CONFIG" | grep -q "$FUNCTION_NAME"; then
+            echo "S3 trigger already exists. Skipping trigger creation."
+          else
+            echo "Adding S3 trigger for bucket: $S3_BUCKET_NAME and suffix: $S3_EVENT_SUFFIX..."
+            retry aws s3api put-bucket-notification-configuration \
+              --bucket $S3_BUCKET_NAME \
+              --notification-configuration '{
+                "LambdaFunctionConfigurations": [
+                  {
+                    "LambdaFunctionArn": "arn:aws:lambda:'"$AWS_REGION"':'"$ACCOUNT_ID"':function:'"$FUNCTION_NAME"'",
+                    "Events": ["s3:ObjectCreated:Put"],
+                    "Filter": {
+                      "Key": {
+                        "FilterRules": [
+                          {"Name": "suffix", "Value": ".pdf"}
+                        ]
+                      }
                     }
                   }
-                }
-              ]
-            }'
+                ]
+              }'
+          fi
 
-          echo "S3 trigger added successfully."
+          echo "S3 trigger setup complete."
