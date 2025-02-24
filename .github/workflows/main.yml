@@ -150,7 +150,7 @@ jobs:
 
   deploy_ec2:
     needs: check_changes
-    if: needs.check_changes.outputs.ec2_changed == ' true '
+    if: needs.check_changes.outputs.ec2_changed && needs.check_changes.outputs.ec2_changed == 'true'
     runs-on: ubuntu-latest
 
     steps:
