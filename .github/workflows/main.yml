@@ -6,11 +6,43 @@ on:
       - main
 
 jobs:
-  docker_cicd:
+  check_changes:
+    runs-on: ubuntu-latest
+    outputs:
+      lambda_changed: ${{ steps.filter.outputs.lambda_changed }}
+      ec2_changed: ${{ steps.filter.outputs.ec2_changed }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Fetch full git history
+        run: git fetch --unshallow
+
+      - name: Check for changes
+        id: filter
+        run: |
+          echo "Checking for changed files..."
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+          LAMBDA_CHANGED=$(echo "$CHANGED_FILES" | grep "^ai-data-integration-lambda/" || true)
+          EC2_CHANGED=$(echo "$CHANGED_FILES" | grep "^ai-data-integration/" || true)
+
+          echo "LAMBDA_CHANGED files: $LAMBDA_CHANGED"
+          echo "EC2_CHANGED files: $EC2_CHANGED"
+
+          echo "lambda_changed=${LAMBDA_CHANGED:+true}" | tr -d '[:space:]' >> $GITHUB_OUTPUT
+          echo "ec2_changed=${EC2_CHANGED:+true}" | tr -d '[:space:]' >> $GITHUB_OUTPUT
+
+  deploy_lambda:
+    needs: check_changes
+    if: needs.check_changes.outputs.lambda_changed != ''
     runs-on: ubuntu-latest
     permissions:
-      id-token: write   
-      contents: read  
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout Code
@@ -27,6 +59,20 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Delete Existing ECR Images
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
+        run: |
+          echo "Deleting all existing ECR images..."
+          IMAGE_IDS=$(aws ecr list-images --repository-name $REPOSITORY --query 'imageIds[*]' --output json)
+          if [ "$IMAGE_IDS" != "[]" ]; then
+            aws ecr batch-delete-image --repository-name $REPOSITORY --image-ids "$IMAGE_IDS"
+            echo "All existing images deleted."
+          else
+            echo "No images to delete."
+          fi
+
       - name: Build, Tag, and Push Docker Image
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
@@ -34,13 +80,14 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           echo "Building Docker image..."
-          docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG .
+          docker build -f ./ai_data_integration_lambda/Dockerfile -t $REGISTRY/$REPOSITORY:$IMAGE_TAG ./ai_data_integration_lambda && \
           echo "Pushing Docker image to Amazon ECR..."
           docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+          echo "Docker image push completed successfully!"
 
       - name: Deploy Lambda Function
         env:
-          FUNCTION_NAME: inspect_point_ai_dataintegration2
+          FUNCTION_NAME: inspectpoint-ai-data-integration-lambda
           IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_NAME }}:${{ github.sha }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
           AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
@@ -88,40 +135,31 @@ jobs:
             exit 1
           fi
 
-      - name: Add S3 Trigger
+  deploy_ec2:
+    needs: check_changes
+    if: needs.check_changes.outputs.ec2_changed != ''
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Debug EC2 Changed Output
+        run: |
+          echo "EC2_CHANGED Output: '${{ needs.check_changes.outputs.ec2_changed }}'"
+
+      - name: Pull Code to EC2 and Restart Gunicorn
         env:
-          FUNCTION_NAME: inspect_point_ai_dataintegration
-          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
-          S3_EVENT_SUFFIX: .pdf
+          EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
-          echo "Granting S3 permission to invoke the Lambda function..."
-          ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
-          aws lambda add-permission \
-            --function-name $FUNCTION_NAME \
-            --statement-id s3-trigger \
-            --action lambda:InvokeFunction \
-            --principal s3.amazonaws.com \
-            --source-arn arn:aws:s3:::$S3_BUCKET_NAME \
-            --source-account $ACCOUNT_ID || echo "Permission already exists."
-
-          echo "Adding S3 trigger for bucket: $S3_BUCKET_NAME and suffix: $S3_EVENT_SUFFIX..."
-          aws s3api put-bucket-notification-configuration \
-            --bucket $S3_BUCKET_NAME \
-            --notification-configuration '{
-              "LambdaFunctionConfigurations": [
-                {
-                  "LambdaFunctionArn": "arn:aws:lambda:'"$AWS_REGION"':'"$ACCOUNT_ID"':function:'"$FUNCTION_NAME"'",
-                  "Events": ["s3:ObjectCreated:Put"],
-                  "Filter": {
-                    "Key": {
-                      "FilterRules": [
-                        {"Name": "suffix", "Value": ".pdf"}
-                      ]
-                    }
-                  }
-                }
-              ]
-            }'
-
-          echo "S3 trigger added successfully."
+          echo "Pulling latest code to EC2 and restarting Gunicorn..."
+          aws ssm send-command \
+            --instance-ids $EC2_INSTANCE_ID \
+            --region $AWS_REGION \
+            --document-name "AWS-RunShellScript" \
+            --comment "Git pull to correct folder and restart Gunicorn" \
+            --parameters commands=["if [ ! -d /home/ubuntu/ai-data-integration ]; then git clone https://github.com/manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration; fi && \
+            cd /home/ubuntu/ai-data-integration && \
+            git pull origin main && \
+            source /home/ubuntu/ai_data_integration/venv/bin/activate && \
+            pip install -r requirements.txt && \
+            sudo systemctl restart gunicorn"]
+          echo "Code pulled and Gunicorn restarted successfully on EC2."

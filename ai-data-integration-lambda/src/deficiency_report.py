@@ -53,7 +53,6 @@ class DeficiencyReportGenerator:
                 temperature=0,
             )
             report = response.dict()
-            print(report)        
             return report
         except FileNotFoundError as e:
             raise Exception(f"An unexpected error occurred while generating the report for PDF {pdf_id}: {e}")
