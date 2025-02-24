@@ -35,13 +35,13 @@ jobs:
           if [ -n "$LAMBDA_CHANGED" ]; then
             echo "lambda_changed=true" >> $GITHUB_OUTPUT
           else
-            echo "lambda_changed=false" >> $GITHUB_OUTPUT
+            echo "lambda_changed=" >> $GITHUB_OUTPUT
           fi
       
           if [ -n "$EC2_CHANGED" ]; then
             echo "ec2_changed=true" >> $GITHUB_OUTPUT
           else
-            echo "ec2_changed=false" >> $GITHUB_OUTPUT
+            echo "ec2_changed=" >> $GITHUB_OUTPUT
           fi
 
           echo "Output for lambda_changed: $(cat $GITHUB_OUTPUT | grep 'lambda_changed')"
@@ -51,7 +51,7 @@ jobs:
 
   deploy_lambda:
     needs: check_changes
-    if: needs.check_changes.outputs.lambda_changed == ' true '
+    if: needs.check_changes.outputs.lambda_changed != ''
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -150,7 +150,7 @@ jobs:
 
   deploy_ec2:
     needs: check_changes
-    if: needs.check_changes.outputs.ec2_changed && needs.check_changes.outputs.ec2_changed == 'true'
+    if: needs.check_changes.outputs.ec2_changed != ''
     runs-on: ubuntu-latest
 
     steps:
