@@ -39,7 +39,7 @@ jobs:
           fi
       
           if [ -n "$EC2_CHANGED" ]; then
-            echo "ec2_changed=true" >> $GITHUB_OUTPUT
+            echo "ec2_changed=$(echo $EC2_CHANGED | xargs)" >> $GITHUB_OUTPUT
           else
             echo "ec2_changed=false" >> $GITHUB_OUTPUT
           fi
