@@ -150,6 +150,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Configure AWS Credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
       - name: Debug EC2 Changed Output
         run: |
           echo "EC2_CHANGED Output: '${{ needs.check_changes.outputs.ec2_changed }}'"
@@ -167,4 +173,5 @@ jobs:
             --comment "Git pull to correct folder and restart Gunicorn" \
             --parameters 'commands=["if [ ! -d /home/ubuntu/ai-data-integration ]; then git clone https://github.com/manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration; fi", "cd /home/ubuntu/ai-data-integration", "git pull origin main", "source /home/ubuntu/ai-data-integration/venv/bin/activate", "pip install -r requirements.txt", "sudo systemctl restart gunicorn"]'
           echo "Code pulled and Gunicorn restarted successfully on EC2."
+
 
