@@ -44,6 +44,10 @@ jobs:
             echo "ec2_changed=false" >> $GITHUB_OUTPUT
           fi
       
+          echo "Output for lambda_changed: $(cat $GITHUB_OUTPUT | grep 'lambda_changed')"
+          echo "Output for ec2_changed: $(cat $GITHUB_OUTPUT | grep 'ec2_changed')"
+      
+      
 
   deploy_lambda:
     needs: check_changes
