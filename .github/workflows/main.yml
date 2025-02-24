@@ -20,25 +20,34 @@ jobs:
         run: git fetch --unshallow
 
       - name: Check for changes
-        id: filter
         run: |
           echo "Checking for changed files..."
           CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
           echo "Changed files:"
           echo "$CHANGED_FILES"
-
+      
           LAMBDA_CHANGED=$(echo "$CHANGED_FILES" | grep "^ai-data-integration-lambda/" || true)
           EC2_CHANGED=$(echo "$CHANGED_FILES" | grep "^ai-data-integration/" || true)
-
+      
           echo "LAMBDA_CHANGED files: $LAMBDA_CHANGED"
           echo "EC2_CHANGED files: $EC2_CHANGED"
-
-          echo "lambda_changed=${LAMBDA_CHANGED:+true}" | tr -d '[:space:]' >> $GITHUB_OUTPUT
-          echo "ec2_changed=${EC2_CHANGED:+true}" | tr -d '[:space:]' >> $GITHUB_OUTPUT
+      
+          if [ -n "$LAMBDA_CHANGED" ]; then
+            echo "lambda_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "lambda_changed=false" >> $GITHUB_OUTPUT
+          fi
+      
+          if [ -n "$EC2_CHANGED" ]; then
+            echo "ec2_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "ec2_changed=false" >> $GITHUB_OUTPUT
+          fi
+      
 
   deploy_lambda:
     needs: check_changes
-    if: needs.check_changes.outputs.lambda_changed != ''
+    if: needs.check_changes.outputs.lambda_changed == 'true'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -137,7 +146,7 @@ jobs:
 
   deploy_ec2:
     needs: check_changes
-    if: needs.check_changes.outputs.ec2_changed != ''
+    if: needs.check_changes.outputs.ec2_changed == 'true'
     runs-on: ubuntu-latest
 
     steps:
