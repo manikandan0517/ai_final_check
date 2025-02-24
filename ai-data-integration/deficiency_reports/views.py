@@ -126,7 +126,7 @@ def generate_deficiency_report(request, id):
 @extend_schema(tags=['Report'])
 @api_view(["GET"])
 def get_deficiency_report(request, id):
-    logger.info(f"Retrieving deficiency report for PDF ID: {id}")
+    logger.info(f"Retrieving deficiency report for PDF with ID: {id}")
     try:
         pdf = PDF.objects.get(id=id)
         if not pdf.deficiency_report:
