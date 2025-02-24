@@ -127,20 +127,42 @@ jobs:
           echo "EC2_CHANGED Output: '${{ needs.check_changes.outputs.ec2_changed }}'"
 
       - name: Pull Code to EC2 and Restart Gunicorn
+        id: send_command
         env:
           EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
-          aws ssm send-command \
+          COMMAND_ID=$(aws ssm send-command \
             --instance-ids $EC2_INSTANCE_ID \
             --region $AWS_REGION \
             --document-name "AWS-RunShellScript" \
             --comment "Git pull and restart Gunicorn" \
-            --parameters 'commands=[
+            --parameters commands='[
               "if [ ! -d /home/ubuntu/ai-data-integration ]; then git clone https://github.com/manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration; fi",
               "cd /home/ubuntu/ai-data-integration",
               "git pull origin main",
               "source /home/ubuntu/ai-data-integration/venv/bin/activate",
               "pip install -r requirements.txt",
               "sudo systemctl restart gunicorn"
-            ]'
+            ]' \
+            --query "Command.CommandId" \
+            --output text)
+          
+          echo "Command ID: $COMMAND_ID"
+          echo "command_id=$COMMAND_ID" >> $GITHUB_ENV
+
+      - name: Get Command Output
+        env:
+          EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          OUTPUT=$(aws ssm list-command-invocations \
+            --command-id ${{ env.command_id }} \
+            --details \
+            --region $AWS_REGION \
+            --query 'CommandInvocations[0].CommandPlugins[*].{Name:Name, Status:Status, Output:Output}' \
+            --output table)
+          
+          echo "Command Output:"
+          echo "$OUTPUT"
+
