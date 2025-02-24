@@ -9,8 +9,8 @@ jobs:
   check_changes:
     runs-on: ubuntu-latest
     outputs:
-      lambda_changed: ${{ steps.filter.outputs.lambda_changed }}
-      ec2_changed: ${{ steps.filter.outputs.ec2_changed }}
+      lambda_changed: ${{ steps.set_outputs.outputs.lambda_changed }}
+      ec2_changed: ${{ steps.set_outputs.outputs.ec2_changed }}
 
     steps:
       - name: Checkout Code
@@ -20,6 +20,7 @@ jobs:
         run: git fetch --unshallow
 
       - name: Check for changes
+        id: set_outputs
         run: |
           echo "Checking for changed files..."
           CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
@@ -35,23 +36,18 @@ jobs:
           if [ -n "$LAMBDA_CHANGED" ]; then
             echo "lambda_changed=true" >> $GITHUB_OUTPUT
           else
-            echo "lambda_changed=" >> $GITHUB_OUTPUT
+            echo "lambda_changed=false" >> $GITHUB_OUTPUT
           fi
       
           if [ -n "$EC2_CHANGED" ]; then
             echo "ec2_changed=true" >> $GITHUB_OUTPUT
           else
-            echo "ec2_changed=" >> $GITHUB_OUTPUT
+            echo "ec2_changed=false" >> $GITHUB_OUTPUT
           fi
-
-          echo "Output for lambda_changed: $(cat $GITHUB_OUTPUT | grep 'lambda_changed')"
-          echo "Output for ec2_changed: $(cat $GITHUB_OUTPUT | grep 'ec2_changed')"
-      
-      
 
   deploy_lambda:
     needs: check_changes
-    if: needs.check_changes.outputs.lambda_changed != ''
+    if: needs.check_changes.outputs.lambda_changed == 'true'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -93,7 +89,7 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           echo "Building Docker image..."
-          docker build -f ./ai_data_integration_lambda/Dockerfile -t $REGISTRY/$REPOSITORY:$IMAGE_TAG ./ai_data_integration_lambda && \
+          docker build -f ./ai-data-integration-lambda/Dockerfile -t $REGISTRY/$REPOSITORY:$IMAGE_TAG ./ai-data-integration-lambda && \
           echo "Pushing Docker image to Amazon ECR..."
           docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
           echo "Docker image push completed successfully!"
@@ -150,7 +146,7 @@ jobs:
 
   deploy_ec2:
     needs: check_changes
-    if: needs.check_changes.outputs.ec2_changed != ''
+    if: needs.check_changes.outputs.ec2_changed == 'true'
     runs-on: ubuntu-latest
 
     steps:
