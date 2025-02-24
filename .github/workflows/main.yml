@@ -43,7 +43,6 @@ jobs:
           else
             echo "ec2_changed=false" >> $GITHUB_OUTPUT
           fi
-          echo "ec2_changed=$(echo $EC2_CHANGED | xargs)" >> $GITHUB_OUTPUT
 
           echo "Output for lambda_changed: $(cat $GITHUB_OUTPUT | grep 'lambda_changed')"
           echo "Output for ec2_changed: $(cat $GITHUB_OUTPUT | grep 'ec2_changed')"

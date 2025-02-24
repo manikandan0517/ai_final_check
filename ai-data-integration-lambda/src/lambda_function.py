@@ -67,7 +67,7 @@ os.environ["DD_SITE"] = os.environ.get("DD_SITE")
 os.environ["ENV"] = "DEV"  # This can be overridden if needed.
 
 logger = Logger(service_name="INSPECTPOINT-AI", ddsource="python")
-logger.log("Logger initialized.")
+logger.log("Logger initialized data.")
 def lambda_handler(event, context):
         
     db_manager = DBManager()
