@@ -26,24 +26,15 @@ jobs:
           CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
           echo "Changed files:"
           echo "$CHANGED_FILES"
-      
+
           LAMBDA_CHANGED=$(echo "$CHANGED_FILES" | grep "^ai-data-integration-lambda/" || true)
           EC2_CHANGED=$(echo "$CHANGED_FILES" | grep "^ai-data-integration/" || true)
-      
+
           echo "LAMBDA_CHANGED files: $LAMBDA_CHANGED"
           echo "EC2_CHANGED files: $EC2_CHANGED"
-      
-          if [ -n "$LAMBDA_CHANGED" ]; then
-            echo "lambda_changed=true" >> $GITHUB_OUTPUT
-          else
-            echo "lambda_changed=false" >> $GITHUB_OUTPUT
-          fi
-      
-          if [ -n "$EC2_CHANGED" ]; then
-            echo "ec2_changed=true" >> $GITHUB_OUTPUT
-          else
-            echo "ec2_changed=false" >> $GITHUB_OUTPUT
-          fi
+
+          echo "lambda_changed=${LAMBDA_CHANGED:+true}" >> $GITHUB_OUTPUT
+          echo "ec2_changed=${EC2_CHANGED:+true}" >> $GITHUB_OUTPUT
 
   deploy_lambda:
     needs: check_changes
@@ -73,13 +64,13 @@ jobs:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
         run: |
-          echo "Deleting all existing ECR images..."
+          echo "Deleting existing ECR images..."
           IMAGE_IDS=$(aws ecr list-images --repository-name $REPOSITORY --query 'imageIds[*]' --output json)
           if [ "$IMAGE_IDS" != "[]" ]; then
             aws ecr batch-delete-image --repository-name $REPOSITORY --image-ids "$IMAGE_IDS"
-            echo "All existing images deleted."
+            echo "Existing images deleted."
           else
-            echo "No images to delete."
+            echo "No images found to delete."
           fi
 
       - name: Build, Tag, and Push Docker Image
@@ -88,11 +79,8 @@ jobs:
           REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          echo "Building Docker image..."
-          docker build -f ./ai-data-integration-lambda/Dockerfile -t $REGISTRY/$REPOSITORY:$IMAGE_TAG ./ai-data-integration-lambda && \
-          echo "Pushing Docker image to Amazon ECR..."
+          docker build -f ./ai-data-integration-lambda/Dockerfile -t $REGISTRY/$REPOSITORY:$IMAGE_TAG ./ai-data-integration-lambda
           docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
-          echo "Docker image push completed successfully!"
 
       - name: Deploy Lambda Function
         env:
@@ -101,56 +89,34 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION }}
           AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
         run: |
-          echo "Retrieving AWS Account ID..."
           ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
-          echo "AWS Account ID: $ACCOUNT_ID"
 
           echo "Checking if Lambda function exists..."
-          ATTEMPTS=0
-          MAX_ATTEMPTS=5
-          while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
-            if aws lambda get-function --function-name $FUNCTION_NAME; then
-              echo "Function exists. Updating..."
-              if aws lambda update-function-code --function-name $FUNCTION_NAME --image-uri $IMAGE_URI; then
-                echo "Lambda function updated successfully."
-                break
-              else
-                echo "Update failed, retrying in 5 seconds..."
-                ATTEMPTS=$((ATTEMPTS+1))
-                sleep 5
-              fi
-            else
-              echo "Function does not exist. Creating..."
-              if aws lambda create-function \
-                --function-name $FUNCTION_NAME \
-                --role $AWS_ROLE_ARN \
-                --package-type Image \
-                --code '{"ImageUri":"'"$IMAGE_URI"'"}' \
-                --timeout 900 \
-                --memory-size 1024 \
-                --region $AWS_REGION; then
-                echo "Lambda function created successfully."
-                break
-              else
-                echo "Creation failed, retrying in 5 seconds..."
-                ATTEMPTS=$((ATTEMPTS+1))
-                sleep 5
-              fi
-            fi
-          done
-
-          if [ $ATTEMPTS -eq $MAX_ATTEMPTS ]; then
-            echo "Max retries reached. Exiting with failure."
-            exit 1
+          if aws lambda get-function --function-name $FUNCTION_NAME; then
+            aws lambda update-function-code --function-name $FUNCTION_NAME --image-uri $IMAGE_URI
+            echo "Lambda function updated."
+          else
+            aws lambda create-function \
+              --function-name $FUNCTION_NAME \
+              --role $AWS_ROLE_ARN \
+              --package-type Image \
+              --code ImageUri=$IMAGE_URI \
+              --timeout 900 \
+              --memory-size 1024 \
+              --region $AWS_REGION
+            echo "Lambda function created."
           fi
 
   deploy_ec2:
     needs: check_changes
     if: needs.check_changes.outputs.ec2_changed == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
-      - name: Configure AWS Credentials using OIDC
+      - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
@@ -165,13 +131,16 @@ jobs:
           EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
-          echo "Pulling latest code to EC2 and restarting Gunicorn..."
           aws ssm send-command \
             --instance-ids $EC2_INSTANCE_ID \
             --region $AWS_REGION \
             --document-name "AWS-RunShellScript" \
-            --comment "Git pull to correct folder and restart Gunicorn" \
-            --parameters 'commands=["if [ ! -d /home/ubuntu/ai-data-integration ]; then git clone https://github.com/manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration; fi", "cd /home/ubuntu/ai-data-integration", "git pull origin main", "source /home/ubuntu/ai-data-integration/venv/bin/activate", "pip install -r requirements.txt", "sudo systemctl restart gunicorn"]'
-          echo "Code pulled and Gunicorn restarted successfully on EC2."
-
-
+            --comment "Git pull and restart Gunicorn" \
+            --parameters 'commands=[
+              "if [ ! -d /home/ubuntu/ai-data-integration ]; then git clone https://github.com/manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration; fi",
+              "cd /home/ubuntu/ai-data-integration",
+              "git pull origin main",
+              "source /home/ubuntu/ai-data-integration/venv/bin/activate",
+              "pip install -r requirements.txt",
+              "sudo systemctl restart gunicorn"
+            ]'
