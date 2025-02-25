@@ -140,16 +140,17 @@ jobs:
             else
               echo "✅ Repository already exists."
               cd /home/ubuntu/ai-data-integration || exit 1
+              
               if [ ! -d ".git" ]; then
-                echo "❌ Invalid git repository. Re-cloning the repo..."
+                echo "❌ Invalid git repository detected. Re-cloning the repository..."
                 rm -rf /home/ubuntu/ai-data-integration
                 git clone git@github.com:manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration || { echo "❌ Git clone failed"; exit 1; }
               else
                 echo "📥 Pulling latest changes from GitHub..."
+                git reset --hard origin/main  # Resets local changes
                 git pull origin main || { echo "❌ Git pull failed"; exit 1; }
               fi
             fi
-
             echo "🐍 Checking/Creating virtual environment..."
             if [ ! -d "venv" ]; then
               python3 -m venv venv || { echo "❌ Failed to create virtual environment"; exit 1; }
