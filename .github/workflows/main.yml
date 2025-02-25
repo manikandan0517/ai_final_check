@@ -133,24 +133,29 @@ jobs:
           EC2_IP=${{ secrets.EC2_INSTANCE_IP }}
 
           ssh -o StrictHostKeyChecking=no -i private_key.pem $EC2_USER@$EC2_IP << 'EOF'
+            echo "🔑 Adding GitHub to known hosts..."
+            ssh-keyscan -H github.com >> ~/.ssh/known_hosts
+
             echo "🔄 Checking for existing code..."
             if [ ! -d /home/ubuntu/ai-data-integration ]; then
               echo "🚀 Cloning repository..."
-              git clone git@github.com:manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration1/
+              git clone git@github.com:manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration || { echo "❌ Git clone failed"; exit 1; }
             else
               echo "✅ Repository already exists."
-              cd /home/ubuntu/ai-data-integration1/ || exit 1
-              
+              cd /home/ubuntu/ai-data-integration || exit 1
+
               if [ ! -d ".git" ]; then
                 echo "❌ Invalid git repository detected. Re-cloning the repository..."
-                rm -rf /home/ubuntu/ai-data-integration1/
-                git clone git@github.com:manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration1/ || { echo "❌ Git clone failed"; exit 1; }
+                rm -rf /home/ubuntu/ai-data-integration
+                git clone git@github.com:manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration || { echo "❌ Git clone failed"; exit 1; }
               else
                 echo "📥 Pulling latest changes from GitHub..."
-                git reset --hard origin/main  # Resets local changes
+                git fetch origin || { echo "❌ Git fetch failed"; exit 1; }
+                git reset --hard origin/main || { echo "❌ Git reset failed"; exit 1; }
                 git pull origin main || { echo "❌ Git pull failed"; exit 1; }
               fi
             fi
+
             echo "🐍 Checking/Creating virtual environment..."
             if [ ! -d "venv" ]; then
               python3 -m venv venv || { echo "❌ Failed to create virtual environment"; exit 1; }
@@ -180,3 +185,4 @@ jobs:
             echo "📋 Checking recent Gunicorn logs..."
             sudo journalctl -u gunicorn --since "10 minutes ago" || echo "⚠️ No recent logs found."
           EOF
+
