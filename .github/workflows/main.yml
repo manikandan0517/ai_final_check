@@ -151,18 +151,31 @@ jobs:
           echo "Command ID: $COMMAND_ID"
           echo "command_id=$COMMAND_ID" >> $GITHUB_ENV
 
+      - name: Monitor Command Execution Status
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          STATUS=""
+          while [ "$STATUS" != "Success" ] && [ "$STATUS" != "Failed" ]; do
+            STATUS=$(aws ssm list-command-invocations \
+              --command-id ${{ env.command_id }} \
+              --region $AWS_REGION \
+              --query 'CommandInvocations[0].Status' \
+              --output text)
+            echo "Current status: $STATUS"
+            sleep 5
+          done
+
       - name: Get Command Output
         env:
-          EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
           OUTPUT=$(aws ssm list-command-invocations \
             --command-id ${{ env.command_id }} \
-            --details \
             --region $AWS_REGION \
+            --details \
             --query 'CommandInvocations[0].CommandPlugins[*].{Name:Name, Status:Status, Output:Output}' \
             --output table)
           
           echo "Command Output:"
           echo "$OUTPUT"
-
