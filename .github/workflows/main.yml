@@ -122,64 +122,50 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Debug EC2 Changed Output
+      - name: Set up SSH key
         run: |
-          echo "EC2_CHANGED Output: '${{ needs.check_changes.outputs.ec2_changed }}'"
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > private_key.pem
+          chmod 600 private_key.pem
 
-      - name: Pull Code to EC2 and Restart Gunicorn
-        id: send_command
-        env:
-          EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
+      - name: Pull Code to EC2 and Restart Gunicorn (With Logs)
         run: |
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids $EC2_INSTANCE_ID \
-            --region $AWS_REGION \
-            --document-name "AWS-RunShellScript" \
-            --comment "Git pull and restart Gunicorn" \
-            --parameters commands='[
-              "if [ ! -d /home/ubuntu/ai-data-integration ]; then git clone https://github.com/manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration; fi",
-              "cd /home/ubuntu/ai-data-integration",
-              "git pull origin main",
-              "source /home/ubuntu/ai-data-integration/venv/bin/activate",
-              "pip install -r requirements.txt",
-              "sudo systemctl restart gunicorn"
-            ]' \
-            --query "Command.CommandId" \
-            --output text)
-          
-          echo "Command ID: $COMMAND_ID"
-          echo "command_id=$COMMAND_ID" >> $GITHUB_ENV
+          EC2_USER=ubuntu
+          EC2_IP=${{ secrets.EC2_INSTANCE_IP }}
 
-      - name: Monitor Command Execution Status
-        env:
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+          ssh -o StrictHostKeyChecking=no -i private_key.pem $EC2_USER@$EC2_IP << 'EOF'
+            echo "🔄 Checking for existing code..."
+            if [ ! -d /home/ubuntu/ai-data-integration ]; then
+              echo "🚀 Cloning repository..."
+              git clone https://github.com/manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration
+            else
+              echo "✅ Repository already exists."
+            fi
+
+            echo "📥 Pulling latest changes from GitHub..."
+            cd /home/ubuntu/ai-data-integration || exit 1
+            git pull origin main || { echo "❌ Git pull failed"; exit 1; }
+
+            echo "🐍 Activating virtual environment..."
+            source venv/bin/activate || { echo "❌ Virtual environment activation failed"; exit 1; }
+
+            echo "📦 Installing dependencies..."
+            pip install -r requirements.txt || { echo "❌ Dependency installation failed"; exit 1; }
+
+            echo "🔁 Restarting Gunicorn service..."
+            sudo systemctl restart gunicorn || { echo "❌ Failed to restart Gunicorn"; exit 1; }
+
+            echo "✅ Deployment completed successfully."
+          EOF
+
+      - name: Check EC2 Deployment Status (With Logs)
         run: |
-          STATUS=""
-          sleep 10  # Initial delay to allow the command to start
-          while [ "$STATUS" != "Success" ] && [ "$STATUS" != "Failed" ]; do
-            STATUS=$(aws ssm get-command-invocation \
-              --command-id ${{ env.command_id }} \
-              --instance-id $EC2_INSTANCE_ID \
-              --region $AWS_REGION \
-              --query 'Status' \
-              --output text || echo "Pending")
-            echo "Current status: $STATUS"
-            sleep 5
-          done
+          EC2_USER=ubuntu
+          EC2_IP=${{ secrets.EC2_INSTANCE_IP }}
 
-      - name: Get Command Output
-        env:
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
-        run: |
-          OUTPUT=$(aws ssm get-command-invocation \
-            --command-id ${{ env.command_id }} \
-            --instance-id $EC2_INSTANCE_ID \
-            --region $AWS_REGION \
-            --query 'StandardOutputContent' \
-            --output text)
-
-          echo "Command Output:"
-          echo "$OUTPUT"
+          ssh -o StrictHostKeyChecking=no -i private_key.pem $EC2_USER@$EC2_IP << 'EOF'
+            echo "🔍 Checking Gunicorn service status..."
+            systemctl status gunicorn --no-pager || { echo "❌ Gunicorn service is not running properly"; exit 1; }
+            
+            echo "📋 Checking recent Gunicorn logs..."
+            sudo journalctl -u gunicorn --since "10 minutes ago" || echo "⚠️ No recent logs found."
+          EOF
