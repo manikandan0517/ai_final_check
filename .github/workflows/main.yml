@@ -157,7 +157,7 @@ jobs:
         run: |
           STATUS=""
           while [ "$STATUS" != "Success" ] && [ "$STATUS" != "Failed" ]; do
-            STATUS=$(aws ssm list-command-invocations \
+            STATUS=$(aws ssm get-command-invocation \
               --command-id ${{ env.command_id }} \
               --region $AWS_REGION \
               --query 'CommandInvocations[0].Status' \
