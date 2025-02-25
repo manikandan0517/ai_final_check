@@ -137,17 +137,17 @@ jobs:
             ssh-keyscan -H github.com >> ~/.ssh/known_hosts
 
             echo "🔄 Checking for existing code..."
-            if [ ! -d /home/ubuntu/ai-data-integration ]; then
+            if [ ! -d /home/ubuntu/ai-data-integration1 ]; then
               echo "🚀 Cloning repository..."
-              git clone git@github.com:manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration || { echo "❌ Git clone failed"; exit 1; }
+              git clone git@github.com:manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration1 || { echo "❌ Git clone failed"; exit 1; }
             else
               echo "✅ Repository already exists."
-              cd /home/ubuntu/ai-data-integration || exit 1
+              cd /home/ubuntu/ai-data-integration1 || exit 1
 
               if [ ! -d ".git" ]; then
                 echo "❌ Invalid git repository detected. Re-cloning the repository..."
                 rm -rf /home/ubuntu/ai-data-integration
-                git clone git@github.com:manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration || { echo "❌ Git clone failed"; exit 1; }
+                git clone git@github.com:manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration1 || { echo "❌ Git clone failed"; exit 1; }
               else
                 echo "📥 Pulling latest changes from GitHub..."
                 git fetch origin || { echo "❌ Git fetch failed"; exit 1; }
@@ -185,4 +185,3 @@ jobs:
             echo "📋 Checking recent Gunicorn logs..."
             sudo journalctl -u gunicorn --since "10 minutes ago" || echo "⚠️ No recent logs found."
           EOF
-
