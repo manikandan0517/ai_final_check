@@ -124,7 +124,8 @@ jobs:
 
       - name: Set up SSH key
         run: |
-          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > private_key.pem
+          echo "🔑 Setting up SSH key..."
+          printf '%s\n' "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > private_key.pem
           chmod 600 private_key.pem
 
       - name: Pull Code to EC2 and Restart Gunicorn (With Logs)
@@ -136,7 +137,7 @@ jobs:
             echo "🔄 Checking for existing code..."
             if [ ! -d /home/ubuntu/ai-data-integration ]; then
               echo "🚀 Cloning repository..."
-              git clone https://github.com/manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration
+              git clone git@github.com:manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration
             else
               echo "✅ Repository already exists."
             fi
@@ -144,6 +145,11 @@ jobs:
             echo "📥 Pulling latest changes from GitHub..."
             cd /home/ubuntu/ai-data-integration || exit 1
             git pull origin main || { echo "❌ Git pull failed"; exit 1; }
+
+            echo "🐍 Checking/Creating virtual environment..."
+            if [ ! -d "venv" ]; then
+              python3 -m venv venv || { echo "❌ Failed to create virtual environment"; exit 1; }
+            fi
 
             echo "🐍 Activating virtual environment..."
             source venv/bin/activate || { echo "❌ Virtual environment activation failed"; exit 1; }
@@ -164,8 +170,8 @@ jobs:
 
           ssh -o StrictHostKeyChecking=no -i private_key.pem $EC2_USER@$EC2_IP << 'EOF'
             echo "🔍 Checking Gunicorn service status..."
-            systemctl status gunicorn --no-pager || { echo "❌ Gunicorn service is not running properly"; exit 1; }
-            
+            sudo systemctl status gunicorn --no-pager || { echo "❌ Gunicorn service is not running properly"; exit 1; }
+
             echo "📋 Checking recent Gunicorn logs..."
             sudo journalctl -u gunicorn --since "10 minutes ago" || echo "⚠️ No recent logs found."
           EOF
