@@ -146,7 +146,7 @@ jobs:
 
               if [ ! -d ".git" ]; then
                 echo "❌ Invalid git repository detected. Re-cloning the repository..."
-                rm -rf /home/ubuntu/ai-data-integration
+                rm -rf /home/ubuntu/ai-data-integration1
                 git clone git@github.com:manikandan0517/ip_feature.git /home/ubuntu/ai-data-integration1 || { echo "❌ Git clone failed"; exit 1; }
               else
                 echo "📥 Pulling latest changes from GitHub..."
@@ -165,6 +165,7 @@ jobs:
             source venv/bin/activate || { echo "❌ Virtual environment activation failed"; exit 1; }
 
             echo "📦 Installing dependencies..."
+            pip install --upgrade pip
             pip install -r requirements.txt || { echo "❌ Dependency installation failed"; exit 1; }
 
             echo "🔁 Restarting Gunicorn service..."
